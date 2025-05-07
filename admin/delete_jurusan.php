@@ -6,7 +6,7 @@ if (isset($_GET['id'])) {
 
     $query = "DELETE FROM jurusan WHERE id = ?";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param("i", $id); // gunakan 'i' karena id biasanya integer
+    $stmt->bind_param("i", $id); 
 
     if ($stmt->execute()) {
         $page = isset($_GET['page']) ? $_GET['page'] : 'tampil_jurusan'; 

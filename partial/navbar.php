@@ -17,15 +17,15 @@
 
   <nav class="bg-[#001F3F] text-white px-6 py-3 h-14 flex items-center fixed top-4 left-1/5 right-4 shadow-lg rounded-xl w-[81%] mx-auto" x-data="{ open: false }">
     
-    <!-- Link Buku Panduan -->
-    <a href="../asset/buku panduan.pdf" target="_blank" class="flex items-center space-x-2 text-white hover:underline mr-6">
+ 
+    <a href="../asset/Buku Panduan.pdf" target="_blank" class="flex items-center space-x-2 text-white hover:underline mr-6">
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
       </svg>
       <span>Buku Panduan</span>
     </a>
 
-  <!-- Link Laporan (docx) -->
+
 <a href="../asset/LAPORAN ABSENSI.docx" download class="flex items-center space-x-2 text-white hover:underline ml-6">
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
     <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-6h6v6m2 4H7a2 2 0 01-2-2V5a2 2 0 012-2h5.5l5.5 5.5V19a2 2 0 01-2 2z" />

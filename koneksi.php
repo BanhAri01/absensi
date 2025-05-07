@@ -4,7 +4,6 @@ $dbname = "absensi";
 $username = "root";
 $password = "";
 
-// Menggunakan MySQLi Object-Oriented
 $conn = new mysqli($host, $username, $password, $dbname);
 
 if ($conn->connect_error) {

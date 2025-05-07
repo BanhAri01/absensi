@@ -12,7 +12,7 @@ $mode_absen = $data_mode['mode'];
 
 
 $mode_absen = $mode_absen + 1;
-if ($mode_absen > 3) {
+if ($mode_absen > 2) {
     $mode_absen = 1;
 }
 

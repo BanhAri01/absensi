@@ -30,7 +30,7 @@ if (!$user) {
 }
 
 if (!isset($user['role'])) {
-    echo "Role tidak ditemukan. Periksa database!";
+    echo "Role tidak ditemukan.";
     exit();
 }
 

@@ -1,44 +1,58 @@
 <?php
-require '../koneksi.php';
-date_default_timezone_set('Asia/Jakarta');
-$hariIni = date('Y-m-d');
-$bulanIni = date('Y-m');
+include '../koneksi.php';
 
 // Total siswa
-$querySiswa = "SELECT COUNT(*) AS total FROM siswa";
-$resultSiswa = $conn->query($querySiswa);
-$totalSiswa = $resultSiswa ? $resultSiswa->fetch_assoc()['total'] : 0;
+$queryTotalSiswa = "SELECT COUNT(*) AS total FROM siswa";
+$resultTotalSiswa = $conn->query($queryTotalSiswa);
+$totalSiswa = $resultTotalSiswa->fetch_assoc()['total'];
 
 // Total kelas
-$queryKelas = "SELECT COUNT(*) AS total FROM kelas";
-$resultKelas = $conn->query($queryKelas);
-$totalKelas = $resultKelas ? $resultKelas->fetch_assoc()['total'] : 0;
+$queryTotalKelas = "SELECT COUNT(*) AS total FROM kelas";
+$resultTotalKelas = $conn->query($queryTotalKelas);
+$totalKelas = $resultTotalKelas->fetch_assoc()['total'];
 
 // Total user
-$queryUser = "SELECT COUNT(*) AS total FROM users";
-$resultUser = $conn->query($queryUser);
-$totalUser = $resultUser ? $resultUser->fetch_assoc()['total'] : 0;
+$queryTotalUser = "SELECT COUNT(*) AS total FROM users";
+$resultTotalUser = $conn->query($queryTotalUser);
+$totalUser = $resultTotalUser->fetch_assoc()['total'];
 
-// Kelas yang belum absensi hari ini
-$queryKelasBelum = "
-    SELECT k.id, k.singkatan 
-    FROM kelas k 
-    WHERE NOT EXISTS (
-        SELECT 1 
-        FROM absensi a 
-        JOIN siswa s ON a.siswa_id = s.id 
-        WHERE s.kelas_id = k.id AND DATE(a.tanggal) = '$hariIni'
-    )
-";
-$resultKelasBelum = $conn->query($queryKelasBelum);
+// Ambil semua kelas
+$queryKelas = "SELECT id, singkatan FROM kelas";
+$resultKelas = $conn->query($queryKelas);
 $kelasBelumAbsensi = [];
-if ($resultKelasBelum && $resultKelasBelum->num_rows > 0) {
-    while ($row = $resultKelasBelum->fetch_assoc()) {
-        $kelasBelumAbsensi[] = $row;
+
+$tanggalHariIni = date('Y-m-d');
+$kelasBelumAbsensi = [];
+
+while ($kelas = $resultKelas->fetch_assoc()) {
+    $idKelas = $kelas['id'];
+
+    // Cek apakah ada siswa di kelas ini yang sudah absen hari ini
+    $queryCekAbsensi = "
+       SELECT COUNT(*) AS total 
+FROM absensi a
+JOIN siswa s ON a.siswa_id = s.nis
+WHERE s.kelas_id = $idKelas 
+AND a.tanggal = '$tanggalHariIni'
+
+    ";
+
+    $resultCek = $conn->query($queryCekAbsensi);
+
+    if ($resultCek) {
+        $totalAbsensi = $resultCek->fetch_assoc()['total'];
+        if ($totalAbsensi == 0) {
+            $kelasBelumAbsensi[] = $kelas;
+        }
+    } else {
+        echo "Error query absensi: " . $conn->error;
     }
 }
 
-// Rekap bulanan (izin, sakit, alpha)
+
+
+// Rekap absensi (izin, sakit, alpha)
+$bulanIni = date('Y-m');
 $queryRekap = "
     SELECT status, COUNT(*) AS jumlah 
     FROM absensi 
@@ -46,16 +60,22 @@ $queryRekap = "
     GROUP BY status
 ";
 $resultRekap = $conn->query($queryRekap);
-$rekap = ['Izin' => 0, 'Sakit' => 0, 'Alpha' => 0];
-if ($resultRekap) {
-    while ($row = $resultRekap->fetch_assoc()) {
-        $keterangan = ucfirst(strtolower($row['status']));
-        if (isset($rekap[$keterangan])) {
-            $rekap[$keterangan] = $row['jumlah'];
-        }
+
+$rekap = [
+    'Izin' => 0,
+    'Sakit' => 0,
+    'Alpha' => 0
+];
+$map = ['izin' => 'Izin', 'sakit' => 'Sakit', 'alpha' => 'Alpha'];
+
+while ($row = $resultRekap->fetch_assoc()) {
+    $status = strtolower($row['status']);
+    if (isset($map[$status])) {
+        $rekap[$map[$status]] = $row['jumlah'];
     }
 }
 ?>
+
 
 <div class="ml-[226px] pt-20 pl-8">
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
@@ -109,19 +129,18 @@ if ($resultRekap) {
         </div>
     </div>
 
-    <!-- Rekap Bulanan -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 max-w-4xl">
-        <div class="bg-white p-4 rounded-lg shadow-md border-l-4 border-purple-500">
-            <h3 class="text-lg font-bold text-gray-800">Izin Bulan Ini</h3>
-            <p class="text-2xl font-semibold text-gray-700 mt-2"><?= $rekap['Izin'] ?></p>
-        </div>
-        <div class="bg-white p-4 rounded-lg shadow-md border-l-4 border-pink-500">
-            <h3 class="text-lg font-bold text-gray-800">Sakit Bulan Ini</h3>
-            <p class="text-2xl font-semibold text-gray-700 mt-2"><?= $rekap['Sakit'] ?></p>
-        </div>
-        <div class="bg-white p-4 rounded-lg shadow-md border-l-4 border-red-500">
-            <h3 class="text-lg font-bold text-gray-800">Alpha Bulan Ini</h3>
-            <p class="text-2xl font-semibold text-gray-700 mt-2"><?= $rekap['Alpha'] ?></p>
-        </div>
+    <div class="grid grid-cols-3 gap-4 mt-8">
+    <div class="bg-white p-6 rounded-lg shadow text-center">
+        <h2 class="text-lg font-semibold text-gray-700">Izin Bulan Ini</h2>
+        <p class="text-3xl font-bold"><?php echo $rekap['Izin']; ?></p>
+    </div>
+    <div class="bg-white p-6 rounded-lg shadow text-center">
+        <h2 class="text-lg font-semibold text-gray-700">Sakit Bulan Ini</h2>
+        <p class="text-3xl font-bold"><?php echo $rekap['Sakit']; ?></p>
+    </div>
+    <div class="bg-white p-6 rounded-lg shadow text-center">
+        <h2 class="text-lg font-semibold text-gray-700">Alpha Bulan Ini</h2>
+        <p class="text-3xl font-bold"><?php echo $rekap['Alpha']; ?></p>   
     </div>
 </div>
+

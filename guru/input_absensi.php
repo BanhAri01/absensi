@@ -1,154 +1,185 @@
 <?php
 require '../koneksi.php';
+if (session_status() == PHP_SESSION_NONE) session_start();
 
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
-}
 
-$selected_kelas = "";
-$error = '';
-$success = '';
-$siswa_list = [];
-
-// Ambil daftar kelas
 $kelas_list = [];
-$result_kelas = $conn->query("SELECT * FROM kelas");
-while ($row = $result_kelas->fetch_assoc()) {
-    $kelas_list[] = $row;
+$res_k = $conn->query("SELECT * FROM kelas ORDER BY singkatan");
+while($k = $res_k->fetch_assoc()) {
+    $kelas_list[] = $k;
 }
 
-// Filter kelas
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['filter_kelas'])) {
-    $selected_kelas = $_POST['kelas'] ?? "";
+$selected_kelas = $_POST['kelas'] ?? '';
+$error = '';$success = '';
+
+
+define('WA_INSTANCE', 'instance113723');
+define('WA_TOKEN', '4sd8ktsua5evscgx');
+function kirimNotifikasiWA($nomor, $pesan) {
+    $url = "https://api.ultramsg.com/" . WA_INSTANCE . "/messages/chat";
+    $data = [
+        'token' => WA_TOKEN,
+        'to'    => $nomor,
+        'body'  => $pesan
+    ];
+    $opts = ['http' => [
+        'header'  => "Content-type: application/x-www-form-urlencoded",
+        'method'  => 'POST',
+        'content' => http_build_query($data)
+    ]];
+    return file_get_contents($url, false, stream_context_create($opts));
 }
 
-// Simpan absensi
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_absensi'])) {
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_absensi'])) {
     $tanggal = $_POST['tanggal'] ?? date('Y-m-d');
+    $absensiData = $_POST['absensi'] ?? [];
 
-    if (isset($_POST['absensi'])) {
-        foreach ($_POST['absensi'] as $siswa_id => $status) {
-            // Cek berapa kali absensi sudah dilakukan hari ini
-            $countStmt = $conn->prepare("SELECT COUNT(*) as count FROM absensi WHERE siswa_id = ? AND tanggal = ?");
-            $countStmt->bind_param("is", $siswa_id, $tanggal);
-            $countStmt->execute();
-            $countResult = $countStmt->get_result();
-            $row = $countResult->fetch_assoc();
-            $count = intval($row['count']);
+    if (!empty($absensiData)) {
+        $nonHadirs = [];
 
-            if ($status === "hadir") {
-                if ($count < 3) {
-                    $tipe_id = $count + 1;
-                    $stmt = $conn->prepare("INSERT INTO absensi (siswa_id, tanggal, status, tipe_id) VALUES (?, ?, ?, ?)");
-                    $stmt->bind_param("issi", $siswa_id, $tanggal, $status, $tipe_id);
-                    $stmt->execute();
+        foreach ($absensiData as $siswa_id => $status) {
+            // Ambil semua tipe_id absensi hari ini untuk siswa ini
+            $cekTipe = $conn->prepare("SELECT tipe_id FROM absensi WHERE siswa_id=? AND tanggal=? ORDER BY jam ASC");
+            $cekTipe->bind_param("is", $siswa_id, $tanggal);
+            $cekTipe->execute();
+            $result = $cekTipe->get_result();
+            $tipe_ids = array_column($result->fetch_all(MYSQLI_ASSOC), 'tipe_id');
+
+            if ($status === 'hadir') {
+                if (!in_array(1, $tipe_ids)) {
+                    $tipe_id = 1; // masuk
+                } elseif (!in_array(3, $tipe_ids)) {
+                    $tipe_id = 3; // pulang
+                } else {
+                    continue; // sudah absen masuk dan pulang
                 }
+
+                $ist = $conn->prepare(
+                    "INSERT INTO absensi (siswa_id, tanggal, status, tipe_id, jam)
+                     VALUES (?,?,?,?,NOW())"
+                );
+                $ist->bind_param("issi", $siswa_id, $tanggal, $status, $tipe_id);
+                $ist->execute();
+
             } else {
-                if ($count === 0) {
-                    $tipeArray = [1, 2, 3];
-                    foreach ($tipeArray as $tipe_id) {
-                        $stmt = $conn->prepare("INSERT INTO absensi (siswa_id, tanggal, status, tipe_id) VALUES (?, ?, ?, ?)");
-                        $stmt->bind_param("issi", $siswa_id, $tanggal, $status, $tipe_id);
-                        $stmt->execute();
-                    }
-
-                    // Bagian notifikasi WhatsApp telah dihapus
+                // Sakit/izin/alpha hanya dicatat jika belum ada absensi hari ini
+                if (empty($tipe_ids)) {
+                    $tipe_id = 1;
+                    $ist = $conn->prepare(
+                        "INSERT INTO absensi (siswa_id, tanggal, status, tipe_id, jam)
+                         VALUES (?,?,?,?,NOW())"
+                    );
+                    $ist->bind_param("issi", $siswa_id, $tanggal, $status, $tipe_id);
+                    $ist->execute();
                 }
+
+                $pst = $conn->prepare("SELECT nama FROM siswa WHERE id=?");
+                $pst->bind_param("i", $siswa_id);
+                $pst->execute();
+                $nama = $pst->get_result()->fetch_assoc()['nama'];
+                $nonHadirs[] = "$nama ($status)";
             }
         }
-        $success = "Data absensi berhasil disimpan.";
+
+        // Kirim WA bila ada non-hadir
+        if ($nonHadirs) {
+            $q = $conn->prepare(
+                "SELECT u.no_wa, k.singkatan FROM users u
+                 JOIN jabatan j ON u.jabatan_id=j.id
+                 JOIN kelas k ON k.id=?
+                 WHERE j.nama_jabatan='Wali Kelas' LIMIT 1"
+            );
+            $q->bind_param("i", $selected_kelas);
+            $q->execute();
+            $r = $q->get_result()->fetch_assoc();
+            if (!empty($r['no_wa'])) {
+                $msg = "Absensi Kelas {$r['singkatan']} - {$tanggal}:\n" . implode("\n", $nonHadirs);
+                kirimNotifikasiWA($r['no_wa'], $msg);
+            }
+        }
+
+        $success = 'Data absensi berhasil disimpan.';
     } else {
-        $error = "Tidak ada data absensi yang diterima.";
+        $error = 'Tidak ada data absensi yang dipilih.';
     }
 
-    $selected_kelas = $_POST['kelas'] ?? "";
+    $selected_kelas = $_POST['kelas'] ?? '';
 }
 
-// Ambil daftar siswa sesuai kelas
-if ($selected_kelas !== "") {
-    $stmt = $conn->prepare("SELECT siswa.id, siswa.nama, siswa.nis, kelas.singkatan 
-                            FROM siswa 
-                            JOIN kelas ON siswa.kelas_id = kelas.id 
-                            WHERE kelas.id = ?");
-    $stmt->bind_param("i", $selected_kelas);
-    $stmt->execute();
-    $result = $stmt->get_result();
+// Ambil daftar siswa sesuai filter kelas
+if ($selected_kelas !== '') {
+    $sst = $conn->prepare(
+        "SELECT s.id,s.nis,s.nama,k.singkatan
+         FROM siswa s JOIN kelas k ON s.kelas_id=k.id
+         WHERE k.id=? ORDER BY s.nama"
+    );
+    $sst->bind_param("i", $selected_kelas);
+    $sst->execute();
+    $sl = $sst->get_result();
 } else {
-    $result = $conn->query("SELECT siswa.id, siswa.nama, siswa.nis, kelas.singkatan 
-                            FROM siswa 
-                            JOIN kelas ON siswa.kelas_id = kelas.id");
+    $sl = $conn->query(
+        "SELECT s.id,s.nis,s.nama,k.singkatan
+         FROM siswa s JOIN kelas k ON s.kelas_id=k.id
+         ORDER BY k.singkatan, s.nama"
+    );
 }
-while ($row = $result->fetch_assoc()) {
-    $siswa_list[] = $row;
-}
+$siswa_list = $sl->fetch_all(MYSQLI_ASSOC);
 ?>
 
-?>
+<!-- HTML Input Absensi -->
+<div class="shadow-lg rounded-lg bg-white p-3 w-[83%] h-auto ml-64 mt-16">
+    <form method="post" class="flex items-end space-x-4 mb-4">
+        <div>
+            <label class="block font-medium">Pilih Kelas:</label>
+            <select name="kelas" class="p-2 border rounded-md">
+                <option value="">Semua Kelas</option>
+                <?php foreach($kelas_list as $k): ?>
+                <option value="<?= $k['id'] ?>" <?= ($selected_kelas == $k['id'])?'selected':'' ?>>
+                    <?= htmlspecialchars($k['singkatan']) ?>
+                </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <button type="submit" name="filter_kelas"
+                class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600">
+            Filter
+        </button>
+    </form>
+    <?php if($error): ?><p class="text-red-500 text-center"><?= $error ?></p><?php endif; ?>
+    <?php if($success): ?><p class="text-green-500 text-center"><?= $success ?></p><?php endif; ?>
 
-    <div class="mb-4">
-        <form action="" method="post" class="flex items-end space-x-4">
-            <div>
-                <label class="block font-medium">Pilih Kelas:</label>
-                <select name="kelas" class="p-2 border rounded-md">
-                    <option value="">Semua Kelas</option>
-                    <?php foreach ($kelas_list as $kelas): ?>
-                        <option value="<?= htmlspecialchars($kelas['id']) ?>" 
-                          <?= ($selected_kelas == $kelas['id']) ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($kelas['singkatan']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div>
-                <button type="submit" name="filter_kelas" 
-                        class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600">
-                  Filter
-                </button>
-            </div>
-        </form>
-    </div>
-    
-    <?php 
-    if ($error) echo "<p class='text-red-500 text-center'>$error</p>"; 
-    if ($success) echo "<p class='text-green-500 text-center'>$success</p>"; 
-    ?>
-    
-
-    <form action="" method="post">
+    <form method="post">
         <input type="hidden" name="kelas" value="<?= htmlspecialchars($selected_kelas) ?>">
         <div class="mb-4">
-            <label class="block font-medium">Tanggal Absensi:</label>
-            <input type="date" name="tanggal" class="w-full p-2 border rounded-md" 
-                   value="<?= date('Y-m-d'); ?>" required>
+            <label class="block font-medium">Tanggal:</label>
+            <input type="date" name="tanggal" class="w-full p-2 border rounded-md"
+                   value="<?= htmlspecialchars($_POST['tanggal'] ?? date('Y-m-d')) ?>" required>
         </div>
         <table class="min-w-full border-collapse border border-gray-200">
             <thead>
                 <tr class="bg-gray-200">
-                    <th class="border border-gray-300 px-4 py-2">NIS</th>
-                    <th class="border border-gray-300 px-4 py-2">Nama</th>
-                    <th class="border border-gray-300 px-4 py-2">Kelas</th>
-                    <th class="border border-gray-300 px-4 py-2">Status Absensi</th>
+                    <th class="border px-4 py-2">NIS</th>
+                    <th class="border px-4 py-2">Nama</th>
+                    <th class="border px-4 py-2">Kelas</th>
+                    <th class="border px-4 py-2">Status</th>
                 </tr>
             </thead>
             <tbody>
-                <?php if(count($siswa_list) > 0): ?>
-                    <?php foreach ($siswa_list as $siswa): ?>
-                    <tr>
-                        <td class="border border-gray-300 px-4 py-2"><?= htmlspecialchars($siswa['nis']); ?></td>
-                        <td class="border border-gray-300 px-4 py-2"><?= htmlspecialchars($siswa['nama']); ?></td>
-                        <td class="border border-gray-300 px-4 py-2"><?= htmlspecialchars($siswa['singkatan']); ?></td>
-                        <td class="border border-gray-300 px-4 py-2">
-                            <label><input type="radio" name="absensi[<?= $siswa['id'] ?>]" value="hadir" required> Hadir</label>
-                            <label class="ml-2"><input type="radio" name="absensi[<?= $siswa['id'] ?>]" value="izin"> Izin</label>
-                            <label class="ml-2"><input type="radio" name="absensi[<?= $siswa['id'] ?>]" value="sakit"> Sakit</label>
-                            <label class="ml-2"><input type="radio" name="absensi[<?= $siswa['id'] ?>]" value="alpha"> Alpha</label>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <tr>
-                        <td colspan="4" class="text-center py-4">Tidak ada siswa untuk kelas yang dipilih.</td>
-                    </tr>
+                <?php if($siswa_list): foreach($siswa_list as $s): ?>
+                <tr>
+                    <td class="border px-4 py-2"><?= htmlspecialchars($s['nis']) ?></td>
+                    <td class="border px-4 py-2"><?= htmlspecialchars($s['nama']) ?></td>
+                    <td class="border px-4 py-2"><?= htmlspecialchars($s['singkatan']) ?></td>
+                    <td class="border px-4 py-2">
+                        <label><input type="radio" name="absensi[<?= $s['id'] ?>]" value="hadir" required> Hadir</label>
+                        <label class="ml-2"><input type="radio" name="absensi[<?= $s['id'] ?>]" value="izin"> Izin</label>
+                        <label class="ml-2"><input type="radio" name="absensi[<?= $s['id'] ?>]" value="sakit"> Sakit</label>
+                        <label class="ml-2"><input type="radio" name="absensi[<?= $s['id'] ?>]" value="alpha"> Alpha</label>
+                    </td>
+                </tr>
+                <?php endforeach; else: ?>
+                <tr><td colspan="4" class="text-center py-4">Tidak ada siswa.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -159,4 +190,3 @@ while ($row = $result->fetch_assoc()) {
         </div>
     </form>
 </div>
-
